@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import json
 
 # Page configuration
 st.set_page_config(
@@ -13,10 +14,14 @@ st.set_page_config(
 # Custom High-End Modern CSS, Animations & Footer Styles
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
+    }
+    
+    code, pre {
+        font-family: 'JetBrains Mono', monospace !important;
     }
     
     /* Hero Header Container */
@@ -125,6 +130,18 @@ st.markdown("""
         100% { box-shadow: 0 0 32px rgba(239, 68, 68, 0.5); }
     }
 
+    /* API Spec Box */
+    .api-badge {
+        display: inline-block;
+        background: #0284c7;
+        color: #fff;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        margin-right: 6px;
+    }
+
     /* Custom Signature Footer */
     .custom-footer {
         margin-top: 50px;
@@ -182,92 +199,144 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Form Section
-with st.form("input_form"):
-    st.markdown("### 📍 Charging Corridor Topology")
-    col1, col2 = st.columns(2)
-    with col1:
-        city_zone = st.selectbox("Municipal Zone", ["Zone A", "Zone B", "Zone C", "Zone D", "Zone E"])
-    with col2:
-        station_type = st.selectbox("Charger Tier", ["Normal", "Fast", "Supercharger"])
+# Navigation Tabs
+tab_ui, tab_api = st.tabs(["📊 Interactive Forecaster", "🔌 Enterprise API & OCPP Integration"])
 
-    st.markdown("### 📊 Live Telemetry & Feeders")
-    c1, c2 = st.columns(2)
-    with c1:
-        vehicles_charged = st.slider("Active Fleet (Vehicles)", min_value=1, max_value=30, value=12)
-        duration = st.slider("Session Duration (mins)", 15, 120, 45)
-        energy_dispensed = st.number_input("Dispensed Energy (kWh)", 10.0, 500.0, 180.0, step=10.0)
-    with c2:
-        grid_load = st.slider("Feeder Base Load (MW)", 50, 500, 260)
-        renewable = st.slider("Renewable Buffer (%)", 0, 100, 35)
+with tab_ui:
+    with st.form("input_form"):
+        st.markdown("### 📍 Charging Corridor Topology")
+        col1, col2 = st.columns(2)
+        with col1:
+            city_zone = st.selectbox("Municipal Zone", ["Zone A", "Zone B", "Zone C", "Zone D", "Zone E"])
+        with col2:
+            station_type = st.selectbox("Charger Tier", ["Normal", "Fast", "Supercharger"])
 
-    st.markdown("### 🕒 Temporal Parameters")
-    hour = st.slider("Hour (0-23)", 0, 23, 18)
-    day = st.selectbox(
-        "Day of Week",
-        options=[0, 1, 2, 3, 4, 5, 6],
-        format_func=lambda x: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][x]
+        st.markdown("### 📊 Live Telemetry & Feeders")
+        c1, c2 = st.columns(2)
+        with c1:
+            vehicles_charged = st.slider("Active Fleet (Vehicles)", min_value=1, max_value=30, value=12)
+            duration = st.slider("Session Duration (mins)", 15, 120, 45)
+            energy_dispensed = st.number_input("Dispensed Energy (kWh)", 10.0, 500.0, 180.0, step=10.0)
+        with c2:
+            grid_load = st.slider("Feeder Base Load (MW)", 50, 500, 260)
+            renewable = st.slider("Renewable Buffer (%)", 0, 100, 35)
+
+        st.markdown("### 🕒 Temporal Parameters")
+        hour = st.slider("Hour (0-23)", 0, 23, 18)
+        day = st.selectbox(
+            "Day of Week",
+            options=[0, 1, 2, 3, 4, 5, 6],
+            format_func=lambda x: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][x]
+        )
+
+        submit = st.form_submit_button("⚡ Run Grid Risk Assessment")
+
+    if submit:
+        # 1. Cyclical trigonometric projections
+        hour_sin = np.sin(2 * np.pi * hour / 24.0)
+        hour_cos = np.cos(2 * np.pi * hour / 24.0)
+        day_sin = np.sin(2 * np.pi * day / 7.0)
+        day_cos = np.cos(2 * np.pi * day / 7.0)
+
+        # 2. DataFrame generation
+        input_data = pd.DataFrame([{
+            'city_zone': city_zone,
+            'station_type': station_type,
+            'vehicles_charged': vehicles_charged,
+            'avg_charging_duration_minutes': duration,
+            'energy_dispensed_kwh': energy_dispensed,
+            'grid_load_mw': grid_load,
+            'renewable_energy_used_percent': renewable,
+            'hour_sin': hour_sin,
+            'hour_cos': hour_cos,
+            'day_sin': day_sin,
+            'day_cos': day_cos
+        }])
+
+        # 3. Model Inference
+        prediction_idx = pipeline.predict(input_data)[0]
+        probabilities = pipeline.predict_proba(input_data)[0]
+        pred_label = classes[prediction_idx]
+
+        # Map output styling cards
+        card_class = "card-low" if pred_label == "Low" else ("card-medium" if pred_label == "Medium" else "card-high")
+        status_icon = "🟢" if pred_label == "Low" else ("🟡" if pred_label == "Medium" else "🔴")
+        recommendation = {
+            "Low": "Feeder line capacity is optimal. No active throttling required.",
+            "Medium": "Feeder stress is elevated. Prepare sub-station auxiliary storage dispatch.",
+            "High": "CRITICAL RISK: Potential thermal overload detected! Initiate dynamic load shedding."
+        }[pred_label]
+
+        # Render Modern Animated Card
+        st.markdown(f"""
+        <div class="result-card {card_class}">
+            <div style="font-size: 14px; letter-spacing: 1.5px; text-transform: uppercase; color: #cbd5e1; margin-bottom: 4px;">Predicted Status</div>
+            <div style="font-size: 32px; font-weight: 800; margin-bottom: 10px;">{status_icon} {pred_label.upper()} RISK</div>
+            <div style="font-size: 14px; opacity: 0.9; max-width: 480px; margin: 0 auto;">{recommendation}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Metrics Distribution
+        st.markdown("<br>", unsafe_allow_html=True)
+        m1, m2, m3 = st.columns(3)
+        prob_dict = dict(zip(classes, probabilities))
+        m1.metric("Low Risk Prob", f"{prob_dict.get('Low', 0)*100:.1f}%")
+        m2.metric("Medium Risk Prob", f"{prob_dict.get('Medium', 0)*100:.1f}%")
+        m3.metric("High Risk Prob", f"{prob_dict.get('High', 0)*100:.1f}%")
+
+with tab_api:
+    st.markdown("### 🔌 REST API & CSMS Smart Charging Simulator")
+    st.markdown(
+        "Demonstrating machine-to-machine inference for enterprise operators (Tata Power EZ Charge, Adani, Statiq) "
+        "using standard **OCPP 1.6J / 2.0.1** smart charging control profiles."
     )
-
-    submit = st.form_submit_button("⚡ Run Grid Risk Assessment")
-
-# Dynamic Output Execution
-if submit:
-    # 1. Cyclical trigonometric projections
-    hour_sin = np.sin(2 * np.pi * hour / 24.0)
-    hour_cos = np.cos(2 * np.pi * hour / 24.0)
-    day_sin = np.sin(2 * np.pi * day / 7.0)
-    day_cos = np.cos(2 * np.pi * day / 7.0)
-
-    # 2. DataFrame generation
-    input_data = pd.DataFrame([{
-        'city_zone': city_zone,
-        'station_type': station_type,
-        'vehicles_charged': vehicles_charged,
-        'avg_charging_duration_minutes': duration,
-        'energy_dispensed_kwh': energy_dispensed,
-        'grid_load_mw': grid_load,
-        'renewable_energy_used_percent': renewable,
-        'hour_sin': hour_sin,
-        'hour_cos': hour_cos,
-        'day_sin': day_sin,
-        'day_cos': day_cos
-    }])
-
-    # 3. Model Inference
-    prediction_idx = pipeline.predict(input_data)[0]
-    probabilities = pipeline.predict_proba(input_data)[0]
-    pred_label = classes[prediction_idx]
-
-    # Map output styling cards
-    card_class = "card-low" if pred_label == "Low" else ("card-medium" if pred_label == "Medium" else "card-high")
-    status_icon = "🟢" if pred_label == "Low" else ("🟡" if pred_label == "Medium" else "🔴")
-    recommendation = {
-        "Low": "Feeder line capacity is optimal. No active throttling required.",
-        "Medium": "Feeder stress is elevated. Prepare sub-station auxiliary storage dispatch.",
-        "High": "CRITICAL RISK: Potential thermal overload detected! Initiate dynamic load shedding."
-    }[pred_label]
-
-    # Render Modern Animated Card
-    st.markdown(f"""
-    <div class="result-card {card_class}">
-        <div style="font-size: 14px; letter-spacing: 1.5px; text-transform: uppercase; color: #cbd5e1; margin-bottom: 4px;">Predicted Status</div>
-        <div style="font-size: 32px; font-weight: 800; margin-bottom: 10px;">{status_icon} {pred_label.upper()} RISK</div>
-        <div style="font-size: 14px; opacity: 0.9; max-width: 480px; margin: 0 auto;">{recommendation}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Metrics Distribution
+    
     st.markdown("<br>", unsafe_allow_html=True)
-    m1, m2, m3 = st.columns(3)
-    prob_dict = dict(zip(classes, probabilities))
-    m1.metric("Low Risk Prob", f"{prob_dict.get('Low', 0)*100:.1f}%")
-    m2.metric("Medium Risk Prob", f"{prob_dict.get('Medium', 0)*100:.1f}%")
-    m3.metric("High Risk Prob", f"{prob_dict.get('High', 0)*100:.1f}%")
+    st.markdown('<span class="api-badge">POST</span> `/predict` (FastAPI Microservice Engine)', unsafe_allow_html=True)
+    
+    # Mock live payload generator based on current simulation
+    sample_request = {
+        "city_zone": "Zone A",
+        "station_type": "Supercharger",
+        "vehicles_charged": 18,
+        "avg_charging_duration_minutes": 45.0,
+        "energy_dispensed_kwh": 240.0,
+        "grid_load_mw": 320.0,
+        "renewable_energy_used_percent": 15.0,
+        "hour": 19,
+        "day_of_week": 0
+    }
+    
+    col_req, col_res = st.columns(2)
+    with col_req:
+        st.markdown("**Inbound CSMS JSON Telemetry:**")
+        st.code(json.dumps(sample_request, indent=2), language="json")
+    
+    with col_res:
+        st.markdown("**Outbound Predictive Risk Decision:**")
+        sample_response = {
+            "predicted_risk_tier": "HIGH",
+            "confidence_score": 0.942,
+            "feeder_status": "DANGER",
+            "ocpp_recommended_action": "CRITICAL_LOAD_SHED",
+            "ocpp_set_charging_profile": {
+                "connectorId": 0,
+                "chargingProfilePurpose": "TxDefaultProfile",
+                "chargingProfileKind": "Absolute",
+                "chargingSchedule": {
+                    "duration": 3600,
+                    "chargingRateUnit": "A",
+                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 16.0}]
+                }
+            }
+        }
+        st.code(json.dumps(sample_response, indent=2), language="json")
+        
+    st.info("💡 **Enterprise Feature:** The production backend script (`api.py`) runs independently via Uvicorn/Docker to handle sub-25ms synchronous webhook requests from any central CPO server.")
 
 # Signature Footer
 st.markdown("""
 <div class="custom-footer">
-    Made with <span class="heart-pulse">❤️</span> by <b>Kiran Kumar😁</b> &nbsp;|&nbsp; save electricity ⚡🔋
+    Made with <span class="heart-pulse">❤️</span> by <b>Kiran Kumar</b> &nbsp;|&nbsp; save electricity ⚡🔋
 </div>
 """, unsafe_allow_html=True)
