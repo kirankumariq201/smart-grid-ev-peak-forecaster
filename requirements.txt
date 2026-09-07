@@ -4,4 +4,6 @@ xgboost==2.1.4
 joblib==1.4.2
 pandas==2.2.2
 numpy>=1.26.4
+fastapi>=0.111.0
+uvicorn>=0.30.0
 
