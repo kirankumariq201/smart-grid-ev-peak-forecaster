@@ -7,7 +7,7 @@ st.set_page_config(page_title="EV Grid Risk Forecaster", layout="centered", page
 
 @st.cache_resource
 def load_bundle():
-    return joblib.load('EV_Grid_Forecaster_Model.ipynb')
+    return joblib.load('ev_grid_model.pkl')
 
 bundle = load_bundle()
 pipeline = bundle['pipeline']
